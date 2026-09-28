@@ -22,7 +22,7 @@ jobs:
           sudo apt-get install --no-install-recommends --yes imagemagick shellcheck python3
 
       - name: Run ShellCheck
-        run: shellcheck tests/validate-theme.sh
+        run: shellcheck tests/validate-theme.sh hooks/theme-set.d/50-icon-theme
 
       - name: Test configuration validator
         run: python3 -m unittest discover -s tests -p "test_*.py"

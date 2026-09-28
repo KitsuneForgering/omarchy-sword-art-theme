@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# Omarchy theme-set hook: give the Omarchy launcher the icon set the theme asks for.
+#
+# Omarchy applies a theme's icons.theme to desktop applications through
+# org.gnome.desktop.interface icon-theme (omarchy-theme-set-gnome), so GTK 3 and
+# GTK 4 applications already follow the theme. Omarchy's own bar and launcher do
+# not: the shell resolves every application icon by scanning the XDG icon
+# directories for */apps/* and */devices/* entries and using the first path it
+# finds for a name, so the launcher keeps whichever icon set that scan reaches
+# first, whatever icons.theme says.
+#
+# This hook closes that gap. It links the theme's own application and device
+# icons into ~/.local/share/icons, which the shell scans before /usr/share, so
+# the theme wins that scan. Two details of the scan drive the implementation:
+#
+#   * It runs find without -L, which never descends into a symlinked directory.
+#     The farm therefore holds real directories with one symlink per file, not
+#     a symlink of the theme directory.
+#   * It is named .omarchy-theme-icons and no index.theme is written into it,
+#     so GTK and Qt keep resolving the real theme from /usr/share/icons. The
+#     farm is invisible to the themed icon lookups.
+#
+# Only icons an installed .desktop file actually asks for are linked, so the
+# farm stays small (a few dozen links on a typical Omarchy install). The launcher
+# re-reads its icon index every time the menu opens, so nothing needs a
+# restart after this runs. The icon set is whatever the active theme declares,
+# so this follows a theme change to any other theme too.
+#
+# A theme name means nothing without its icon theme on disk, and a theme cannot
+# install packages itself, so this hook does it: an icons.theme with no matching
+# directory is looked up in a small table of the icon packages Arch carries, and
+# the ones the configured repositories actually offer are installed before the
+# farm is built. Set OMARCHY_ICON_THEME_NO_INSTALL=1 to keep this hook to the
+# links alone and install icon packages by hand.
+#
+# Install with:
+#   omarchy hook install theme-set \
+#     ~/.config/omarchy/themes/sword-art-omarchy/hooks/theme-set.d/50-icon-theme
+
+# No set -e: this hook runs inside a theme change, and a partial farm or a
+# missing optional tool must never abort one. Every failure path below returns
+# explicitly instead.
+set -uo pipefail
+
+STAGED_THEME="$HOME/.local/state/omarchy/current/theme"
+FARM_ROOT="$HOME/.local/share/icons/.omarchy-theme-icons"
+FARM_STATE="$HOME/.local/state/omarchy/icon-theme-farm"
+FALLBACK_ICON_THEME="Yaru-blue"
+MAX_ICON_SIDE=256
+
+notify() {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send -u low "Sword Art Omarchy" "$1"
+  fi
+  return 0
+}
+
+# Where an icon theme lives, preferring the user icon directories in the order
+# the shell's scan reads them, so a user-installed copy of the theme wins over
+# the system one.
+locate_icon_theme() {
+  local name=$1 base
+  local -a data_dirs=()
+
+  IFS=: read -r -a data_dirs <<<"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+  for base in "$HOME/.icons" "$HOME/.local/share/icons" "${data_dirs[@]/%//icons}"; do
+    if [[ -d $base/$name ]]; then
+      printf '%s\n' "$base/$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Packages that can provide an icon theme, one per line. A freedesktop icon
+# theme name does not name its package, so the themes in real use are listed
+# and anything else falls back on the <name>-icon-theme convention, which the
+# caller still has to confirm with the repositories.
+icon_theme_packages() {
+  local name=${1,,}
+  local prefix
+
+  case $name in
+    papirus*) printf 'papirus-icon-theme\n' ;;
+    yaru*) printf 'yaru-icon-theme\n' ;;
+    adwaita*) printf 'adwaita-icon-theme\n' ;;
+    hicolor) printf 'hicolor-icon-theme\n' ;;
+    breeze-dark*) printf 'breeze-dark-icon-theme\n' ;;
+    breeze*) printf 'breeze-icons\n' ;;
+    materia*) printf 'materia-icon-theme\n' ;;
+    numix*) printf 'numix-icon-theme\n' ;;
+    orchis*) printf 'orchis-icon-theme\n' ;;
+    elementary*) printf 'elementary-icon-theme\n' ;;
+    oxygen*) printf 'oxygen-icons\n' ;;
+    *)
+      prefix=${name%%[-_]*}
+      printf '%s-icon-theme\n%s-icons\n' "$prefix" "$prefix"
+      ;;
+  esac
+}
+
+# Install the icon theme, if the active theme's icons.theme names one this
+# machine can get. Returns nonzero when nothing was installed, leaving the
+# caller to report it.
+install_icon_theme() {
+  local name=$1 package candidates
+  local -a available=()
+
+  candidates=$(icon_theme_packages "$name")
+  while IFS= read -r package; do
+    [[ -n $package ]] || continue
+    # Only offer what the configured repositories carry, so a guessed name
+    # does not turn into a pacman error dialog.
+    if pacman -Si "$package" &>/dev/null; then
+      available+=("$package")
+    fi
+  done <<<"$candidates"
+
+  ((${#available[@]} > 0)) || return 1
+
+  notify "Icon theme '$name' is missing, installing ${available[*]}"
+  omarchy pkg add "${available[@]}" &>/dev/null && return 0
+
+  # A theme switch started from the shell UI has no terminal for sudo to
+  # prompt in, so fall back to asking through the desktop.
+  if [[ -n ${WAYLAND_DISPLAY:-}${DISPLAY:-} ]] && command -v pkexec &>/dev/null; then
+    pkexec pacman -S --noconfirm --needed "${available[@]}" &>/dev/null && return 0
+  fi
+  return 1
+}
+
+# Icon names an installed application asks for, deduplicated. A name containing a
+# path is the application's own icon file, which the shell resolves on its own.
+installed_icons() {
+  local app_dirs=("$HOME/.local/share/applications")
+  local data_dir app_dir file icon
+  local desktop_files=()
+
+  IFS=: read -r -a data_dirs <<<"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+  for data_dir in "${data_dirs[@]}"; do
+    app_dirs+=("$data_dir/applications")
+  done
+
+  for app_dir in "${app_dirs[@]}"; do
+    [[ -d $app_dir ]] || continue
+    for file in "$app_dir"/*.desktop; do
+      [[ -f $file ]] && desktop_files+=("$file")
+    done
+  done
+
+  ((${#desktop_files[@]} > 0)) || return 0
+
+  # First Icon= wins per file; later ones in a Localised group are translations.
+  while IFS= read -r icon; do
+    [[ -z $icon || $icon == */* ]] && continue
+    printf '%s\n' "$icon"
+  done < <(
+    awk 'FNR == 1 { found = 0 }
+         !found && /^Icon=/ { sub(/^Icon=/, ""); print; found = 1 }' \
+      "${desktop_files[@]}" | sort -u
+  )
+}
+
+# The icon theme Omarchy just applied, read from the staged theme so a user
+# overlay in ~/.config/omarchy/themes wins over the packaged value, exactly as
+# it does for the gsettings call in omarchy-theme-set-gnome.
+icon_theme=$FALLBACK_ICON_THEME
+if [[ -f $STAGED_THEME/icons.theme ]]; then
+  declared=$(sed -n '/[^[:space:]]/p' "$STAGED_THEME/icons.theme" | head -n 1 | tr -d '[:space:]')
+  if [[ $declared =~ ^[[:alnum:]_.+-]+$ ]]; then
+    icon_theme=$declared
+  fi
+fi
+
+# Drop the farm from the previous theme so a theme change away from this one
+# gives the launcher back its own icon resolution. Only a path this hook
+# recorded is ever removed.
+if [[ -f $FARM_STATE ]]; then
+  previous=$(<"$FARM_STATE")
+  if [[ $previous == "$FARM_ROOT"/* && $previous != "$FARM_ROOT" ]]; then
+    rm -rf -- "$previous"
+  fi
+  rm -f -- "$FARM_STATE"
+fi
+
+# The theme's icon set, installed first if this machine does not have it yet.
+theme_dir=$(locate_icon_theme "$icon_theme") || theme_dir=""
+if [[ -z $theme_dir && ${OMARCHY_ICON_THEME_NO_INSTALL:-0} != 1 ]] &&
+  install_icon_theme "$icon_theme"; then
+  theme_dir=$(locate_icon_theme "$icon_theme") || theme_dir=""
+fi
+
+if [[ -z $theme_dir ]]; then
+  notify "Icon theme '$icon_theme' is not installed, launcher icons unchanged"
+  exit 0
+fi
+
+# Icon sizes to link: scalable first, then raster sizes largest first and never
+# larger than MAX_ICON_SIDE, so the launcher scales a 2x asset down instead of
+# stretching a 24px one. Read from the theme rather than hardcoded, so the hook
+# works for any icons.theme value. Sorted numerically by pixel area.
+#
+# A glob, not find: most icon themes (Papirus among them) reach their size
+# directories through symlinks, and find without -L reports those as symlinks
+# rather than directories.
+size_keys=()
+shopt -s nullglob
+size_dirs=("$theme_dir"/*/)
+shopt -u nullglob
+for dir in "${size_dirs[@]}"; do
+  name=${dir%/}
+  name=${name##*/}
+  if [[ $name == scalable ]]; then
+    size_keys+=("999999999:$name")
+  elif [[ $name =~ ^([0-9]+)x([0-9]+)(@2x)?$ ]]; then
+    width=${BASH_REMATCH[1]}
+    height=${BASH_REMATCH[2]}
+    if ((width <= MAX_ICON_SIDE && height <= MAX_ICON_SIDE)); then
+      size_keys+=("$((width * height)):$name")
+    fi
+  fi
+done
+
+size_order=()
+if ((${#size_keys[@]} > 0)); then
+  while IFS= read -r key; do
+    size_order+=("${key#*:}")
+  done < <(printf '%s\n' "${size_keys[@]}" | sort -t: -k1,1nr)
+fi
+
+if ((${#size_order[@]} == 0)); then
+  notify "Icon theme '$icon_theme' has no usable icon sizes, launcher icons unchanged"
+  exit 0
+fi
+
+icons=()
+while IFS= read -r icon; do
+  icons+=("$icon")
+done < <(installed_icons)
+
+farm="$FARM_ROOT/$icon_theme"
+rm -rf -- "$farm"
+mkdir -p -- "$farm"
+
+linked=0
+for icon in "${icons[@]}"; do
+  for size in "${size_order[@]}"; do
+    for sub in apps devices; do
+      for ext in svg png xpm; do
+        source=$theme_dir/$size/$sub/$icon.$ext
+        [[ -f $source ]] || continue
+        mkdir -p -- "$farm/$size/$sub"
+        if ln -sf -- "$source" "$farm/$size/$sub/$icon.$ext" 2>/dev/null; then
+          linked=$((linked + 1))
+        fi
+        break 3
+      done
+    done
+  done
+done
+
+# Nothing resolved: leave no empty farm behind for the shell's scan to walk.
+if ((linked == 0)); then
+  rm -rf -- "$farm"
+  exit 0
+fi
+
+mkdir -p -- "${FARM_STATE%/*}"
+printf '%s\n' "$farm" >"$FARM_STATE"

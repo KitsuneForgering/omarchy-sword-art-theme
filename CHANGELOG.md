@@ -4,6 +4,29 @@ Notable changes to this theme, newest first. Versions before 0.4.0 were
 informal milestones for readability, not `git tag` references; `0.4.0`
 is this project's first tagged release.
 
+## Unreleased
+
+- New `Icons` section in the README: `papirus-icon-theme` documented as
+  the package behind `icons.theme`, how Omarchy applies it to GTK 3 and
+  GTK 4 applications, how to verify it, and how to override or remove
+  it.
+- New optional `hooks/theme-set.d/50-icon-theme`, which gives Omarchy's
+  own launcher the icon set the active theme declares. The shell resolves
+  application icons by scanning the XDG icon directories rather than by
+  reading `icons.theme`, so the launcher ignored the theme's icons; the
+  hook links them into a user icon directory the shell scans first. It
+  installs the matching icon package when the theme's icon theme is
+  missing, and can be limited to the links alone with
+  `OMARCHY_ICON_THEME_NO_INSTALL=1`.
+- Fixed the README install URL. The cloned theme directory is named after
+  the repository, so the previous URL installed to `sword-art` while
+  `omarchy theme set "Sword Art Omarchy"` looks for `sword-art-omarchy`.
+- The README no longer claims `Yaru-blue-dark` icons; it now matches the
+  `Papirus-Dark` that `icons.theme` has declared since after 0.4.0.
+- `tests/validate-theme.sh` now checks the hook is present and that the
+  README documents both the declared icon theme and the hook install
+  path; CI shellchecks the hook too.
+
 ## 0.4.0 — 2026-09-14 to 2026-09-16
 
 - Interface screenshots and compatibility notes in the README

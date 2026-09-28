@@ -65,6 +65,7 @@ required_files=(
   unlock.png
   preview.png
   preview-unlock.png
+  hooks/theme-set.d/50-icon-theme
   backgrounds/1-ember.png
   backgrounds/2-horizon.png
   backgrounds/3-void.png
@@ -106,6 +107,19 @@ pass "TOML syntax and shell surface values are valid"
 icon_theme=$(sed -n '/[^[:space:]]/p' icons.theme | head -n 1)
 [[ "$icon_theme" =~ ^[[:alnum:]_.+-]+$ ]] || fail "icons.theme contains an invalid icon theme name"
 pass "icons.theme contains a valid icon theme name"
+
+# The icon theme is declared in icons.theme, applied by Omarchy, and explained
+# in the README. A rename that skips any of the three leaves an install that
+# silently falls back to Yaru-blue.
+grep -qF -- "$icon_theme" README.md ||
+  fail "README.md does not document the $icon_theme icon theme from icons.theme"
+pass "README.md documents the icon theme icons.theme declares"
+
+# The hook is only useful if omarchy hook install can find it at the path the
+# README tells people to copy from.
+grep -qF "hooks/theme-set.d/50-icon-theme" README.md ||
+  fail "README.md does not document how to install the icon theme hook"
+pass "README.md documents the icon theme hook install path"
 
 shopt -s nullglob
 backgrounds=(backgrounds/*.png)

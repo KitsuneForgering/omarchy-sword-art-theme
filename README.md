@@ -65,7 +65,7 @@ omarchy pkg add papirus-icon-theme
 # The theme itself. The name of the cloned directory is taken from the
 # repository name, so the URL has to stay Sword-Art-Omarchy for the
 # `omarchy theme set` line below to find it.
-omarchy theme install https://github.com/KitsuneSemCalda/Sword-Art-Omarchy
+omarchy theme install https://github.com/KitsuneForgering/omarchy-sword-art-theme
 omarchy theme set "Sword Art Omarchy"
 
 # Optional: give Omarchy's own launcher the same icon set. See Icons.

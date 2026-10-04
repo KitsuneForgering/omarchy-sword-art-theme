@@ -62,15 +62,13 @@ Check your installed version with `omarchy version`, then install:
 # The icon set this theme asks for. See the Icons section below.
 omarchy pkg add papirus-icon-theme
 
-# The theme itself. The name of the cloned directory is taken from the
-# repository name, so the URL has to stay Sword-Art-Omarchy for the
-# `omarchy theme set` line below to find it.
+# Omarchy names this checkout "sword-art" from the repository URL and
+# applies it as part of installation.
 omarchy theme install https://github.com/KitsuneForgering/omarchy-sword-art-theme
-omarchy theme set "Sword Art Omarchy"
 
 # Optional: give Omarchy's own launcher the same icon set. See Icons.
 omarchy hook install theme-set \
-  ~/.config/omarchy/themes/sword-art-omarchy/hooks/theme-set.d/50-icon-theme
+  ~/.config/omarchy/themes/sword-art/hooks/theme-set.d/50-icon-theme
 ```
 
 The application launcher shares the `[menu]` surface in `shell.toml`.
@@ -133,7 +131,7 @@ before `/usr/share`, so the theme wins that scan:
 
 ```bash
 omarchy hook install theme-set \
-  ~/.config/omarchy/themes/sword-art-omarchy/hooks/theme-set.d/50-icon-theme
+  ~/.config/omarchy/themes/sword-art/hooks/theme-set.d/50-icon-theme
 ```
 
 The hook runs after each theme change, needs no root, and needs no
@@ -160,9 +158,9 @@ To use a different icon set, edit `icons.theme` in your local copy of the
 theme, or overlay a single file over the packaged theme:
 
 ```bash
-mkdir -p ~/.config/omarchy/themes/sword-art-omarchy
-echo "Papirus" > ~/.config/omarchy/themes/sword-art-omarchy/icons.theme
-omarchy theme set "Sword Art Omarchy"
+mkdir -p ~/.config/omarchy/themes/sword-art
+echo "Papirus" > ~/.config/omarchy/themes/sword-art/icons.theme
+omarchy theme set "sword-art"
 ```
 
 ## Backgrounds
